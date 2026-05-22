@@ -2,26 +2,54 @@ import React, { useState } from 'react';
 import { Button, Input, Form, Segmented, message } from 'antd';
 import { UserOutlined, KeyOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { useLogin, useRegister } from '../hooks/mutations/useAuth';
 
 const Auth: React.FC = () => {
     const navigate = useNavigate();
     const [mode, setMode] = useState<'Masuk' | 'Daftar'>('Masuk');
-    const [loading, setLoading] = useState(false);
 
-    const handleSubmit = () => {
-        setLoading(true);
+    const registerMutation = useRegister();
+    const loginMutation = useLogin();
 
-        setTimeout(() => {
-            setLoading(false);
-            if (mode === 'Daftar') {
-                const dummyKey = `-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEAw... [Ini adalah Dummy Private Key yang dihasilkan oleh sistem. Nanti akan diganti dengan response dari API Flask] ...\n-----END RSA PRIVATE KEY-----`;
+    const handleSubmit = (values: { username: string; privateKey?: string }) => {
+        const payload = { username: values.username };
 
-                navigate('/inbox', { state: { newPrivateKey: dummyKey } });
-            } else {
-                message.success('Berhasil masuk ke The Vault!');
-                navigate('/inbox');
-            }
-        }, 1500);
+        if (mode === 'Daftar') {
+            registerMutation.mutate(payload, {
+                onSuccess: (res) => {
+                    localStorage.setItem('user', JSON.stringify({
+                        user_id: res.data.user_id,
+                        username: res.data.username
+                    }));
+                    
+                    navigate('/inbox', { state: { newPrivateKey: res.data.private_key } });
+                },
+                onError: (error: any) => {
+                    const errorMsg = error.response?.data?.message || 'Gagal mendaftar';
+                    message.error(errorMsg);
+                }
+            });
+        } else {
+            loginMutation.mutate(payload, {
+                onSuccess: (res) => {
+                    localStorage.setItem('user', JSON.stringify({
+                        user_id: res.data.user_id,
+                        username: res.data.username
+                    }));
+
+                    if (values.privateKey) {
+                        localStorage.setItem('private_key', values.privateKey);
+                    }
+
+                    message.success(res.message);
+                    navigate('/inbox');
+                },
+                onError: (error: any) => {
+                    const errorMsg = error.response?.data?.message || 'Gagal masuk';
+                    message.error(errorMsg);
+                }
+            });
+        }
     };
 
     return (
@@ -63,7 +91,7 @@ const Auth: React.FC = () => {
                         )}
 
                         <Form.Item className="mt-8 mb-0">
-                            <Button type="primary" htmlType="submit" size="large" block loading={loading} className="h-12 rounded-lg text-base font-semibold shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.01]">
+                            <Button type="primary" htmlType="submit" size="large" block className="h-12 rounded-lg text-base font-semibold shadow-lg shadow-blue-500/30 transition-all hover:scale-[1.01]">
                                 {mode === 'Masuk' ? 'Akses Kotak Masuk' : 'Generate Keys & Daftar'}
                             </Button>
                         </Form.Item>

@@ -1,13 +1,57 @@
-import React from 'react';
-import { Button, Checkbox } from 'antd';
+// src/pages/Inbox.tsx
 
-const dummyMessages = [
+import React, { useState } from 'react';
+import { Modal, Input, Button, message } from 'antd';
+import { KeyOutlined, UnlockOutlined } from '@ant-design/icons';
+import type { MessageData } from '../components/MessageCard';
+import MessageCard from '../components/MessageCard';
+
+const dummyMessages: MessageData[] = [
     { id: 1, sender: 'Johannes', date: '26 August 2025', ciphertext: '[ 18273, 91827, 44512, 90123, 77123, 88212, 99123, 11234, 55123, 66123 ]' },
-    { id: 2, sender: 'Johannes', date: '26 August 2025', ciphertext: '[ 18273, 91827, 44512, 90123, 77123, 88212, 99123, 11234, 55123, 66123 ]' },
-    { id: 3, sender: 'Johannes', date: '26 August 2025', ciphertext: '[ 18273, 91827, 44512, 90123, 77123, 88212, 99123, 11234, 55123, 66123 ]' },
+    { id: 2, sender: 'Budi', date: '26 August 2025', ciphertext: '[ 55123, 66123, 18273, 91827, 44512, 90123, 77123, 88212, 99123, 11234 ]' },
+    { id: 3, sender: 'Siti', date: '26 August 2025', ciphertext: '[ 99123, 11234, 55123, 66123, 18273, 91827, 44512, 90123, 77123, 88212 ]' },
 ];
 
 const Inbox: React.FC = () => {
+    const [isKeyModalVisible, setIsKeyModalVisible] = useState(false);
+    const [inputKey, setInputKey] = useState('');
+    
+    const [pendingMessage, setPendingMessage] = useState<MessageData | null>(null);
+
+    const handleDecryptClick = (msg: MessageData) => {
+        const storedKey = localStorage.getItem('private_key');
+        
+        if (!storedKey) {
+            setPendingMessage(msg);
+            setIsKeyModalVisible(true);
+        } else {
+            processDecryption(msg, storedKey);
+        }
+    };
+
+    const processDecryption = (msg: MessageData, privateKey: string) => {
+        console.log(`Mendekripsi pesan ${msg.id} dengan kunci:`, privateKey);
+        message.success(`Pesan dari ${msg.sender} berhasil didekripsi!`);
+    };
+
+    const handleSaveKey = () => {
+        if (!inputKey.trim()) {
+            message.error('Private Key tidak boleh kosong!');
+            return;
+        }
+
+        localStorage.setItem('private_key', inputKey.trim());
+        message.success('Kunci berhasil diamankan di memori browser.');
+        
+        setIsKeyModalVisible(false);
+        setInputKey('');
+
+        if (pendingMessage) {
+            processDecryption(pendingMessage, inputKey.trim());
+            setPendingMessage(null); // Bersihkan antrean
+        }
+    };
+
     return (
         <div className="w-full max-w-7xl mx-auto">
             <div className="mb-6 sm:mb-8">
@@ -21,33 +65,69 @@ const Inbox: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
                 {dummyMessages.map((msg) => (
-                    <div
-                        key={msg.id}
-                        className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col hover:shadow-md transition-shadow"
-                    >
-                        <div className="flex justify-between items-center mb-4">
-                            <div className="flex items-center gap-3">
-                                <Checkbox className="scale-110!" />
-                                <span className="font-semibold text-slate-800">{msg.sender}</span>
-                            </div>
-                            <span className="text-[10px] sm:text-xs text-slate-400 font-medium">{msg.date}</span>
-                        </div>
-
-                        <div className="mb-6 flex-1">
-                            <p className="font-mono text-xs sm:text-sm text-slate-400 tracking-wider break-all line-clamp-3">
-                                {msg.ciphertext}
-                            </p>
-                        </div>
-
-                        <Button
-                            type="default"
-                            className="w-full! bg-slate-200! border-none! text-slate-700! font-medium! hover:bg-slate-300! hover:text-slate-800! h-10! rounded-lg! mt-auto"
-                        >
-                            Dekripsi Pesan
-                        </Button>
-                    </div>
+                    <MessageCard 
+                        key={msg.id} 
+                        msg={msg} 
+                        onDecrypt={handleDecryptClick} 
+                    />
                 ))}
             </div>
+
+            <Modal
+                title={
+                    <div className="flex items-center gap-2 text-slate-800 pb-2">
+                        <UnlockOutlined className="text-blue-500 text-xl" />
+                        <span className="font-bold">Otorisasi Dibutuhkan</span>
+                    </div>
+                }
+                open={isKeyModalVisible}
+                onCancel={() => {
+                    setIsKeyModalVisible(false);
+                    setPendingMessage(null);
+                }}
+                footer={null}
+                centered
+            >
+                <div className="flex flex-col gap-4 mt-2">
+                    <div className="bg-blue-50 border border-blue-200 p-3 rounded-lg text-blue-700 text-sm leading-relaxed">
+                        Sistem mendeteksi Anda belum memasukkan <strong>Kunci Privat (Private Key)</strong> di sesi ini. Silakan masukkan kunci Anda untuk membuka isi pesan.
+                    </div>
+
+                    <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-2 uppercase">
+                            Private Key Anda
+                        </label>
+                        <Input.TextArea
+                            rows={5}
+                            value={inputKey}
+                            onChange={(e) => setInputKey(e.target.value)}
+                            placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;d=...&#10;n=...&#10;-----END RSA PRIVATE KEY-----"
+                            className="font-mono text-xs! hover:border-blue-500! focus:border-blue-500! rounded-lg!"
+                        />
+                    </div>
+
+                    <div className="flex justify-end gap-2 mt-2">
+                        <Button 
+                            onClick={() => {
+                                setIsKeyModalVisible(false);
+                                setPendingMessage(null);
+                            }}
+                            className="rounded-lg! h-10!"
+                        >
+                            Batal
+                        </Button>
+                        <Button 
+                            type="primary" 
+                            icon={<KeyOutlined />}
+                            onClick={handleSaveKey}
+                            className="rounded-lg! h-10!"
+                        >
+                            Simpan Kunci & Dekripsi
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
         </div>
     );
 };
