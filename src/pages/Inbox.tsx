@@ -1,26 +1,27 @@
-// src/pages/Inbox.tsx
-
-import React, { useState } from 'react';
-import { Modal, Input, Button, message } from 'antd';
+import React, { useMemo, useState } from 'react';
+import { Modal, Input, Button, message, Spin, Empty } from 'antd';
 import { KeyOutlined, UnlockOutlined } from '@ant-design/icons';
-import type { MessageData } from '../components/MessageCard';
 import MessageCard from '../components/MessageCard';
-
-const dummyMessages: MessageData[] = [
-    { id: 1, sender: 'Johannes', date: '26 August 2025', ciphertext: '[ 18273, 91827, 44512, 90123, 77123, 88212, 99123, 11234, 55123, 66123 ]' },
-    { id: 2, sender: 'Budi', date: '26 August 2025', ciphertext: '[ 55123, 66123, 18273, 91827, 44512, 90123, 77123, 88212, 99123, 11234 ]' },
-    { id: 3, sender: 'Siti', date: '26 August 2025', ciphertext: '[ 99123, 11234, 55123, 66123, 18273, 91827, 44512, 90123, 77123, 88212 ]' },
-];
+import { useGetInbox } from '../hooks/queries/useMessage';
+import type { MessageData } from '../types/message.type';
+import { decryptRSA, parsePrivateKey } from '../utils/rsaUtils';
 
 const Inbox: React.FC = () => {
+    const currentUser = useMemo(() => {
+        const userStr = localStorage.getItem('user');
+        return userStr ? JSON.parse(userStr) : null;
+    }, []);
+
     const [isKeyModalVisible, setIsKeyModalVisible] = useState(false);
     const [inputKey, setInputKey] = useState('');
-    
     const [pendingMessage, setPendingMessage] = useState<MessageData | null>(null);
+    const [decryptedMessages, setDecryptedMessages] = useState<Record<number, string>>({});
+
+    const { data: inboxResponse, isLoading, isError, refetch } = useGetInbox(currentUser?.user_id);
 
     const handleDecryptClick = (msg: MessageData) => {
         const storedKey = localStorage.getItem('private_key');
-        
+
         if (!storedKey) {
             setPendingMessage(msg);
             setIsKeyModalVisible(true);
@@ -29,9 +30,20 @@ const Inbox: React.FC = () => {
         }
     };
 
-    const processDecryption = (msg: MessageData, privateKey: string) => {
-        console.log(`Mendekripsi pesan ${msg.id} dengan kunci:`, privateKey);
-        message.success(`Pesan dari ${msg.sender} berhasil didekripsi!`);
+    const processDecryption = (msg: MessageData, privateKeyString: string) => {
+        try {
+            const { d, n } = parsePrivateKey(privateKeyString);
+
+            const plaintext = decryptRSA(msg.ciphertext, d, n);
+            setDecryptedMessages(prev => ({
+                ...prev,
+                [msg.id]: plaintext
+            }));
+
+            message.success(`Pesan berhasil didekripsi!`);
+        } catch (error: any) {
+            message.error(error.message || 'Gagal mendekripsi pesan. Kunci salah atau tidak valid.');
+        }
     };
 
     const handleSaveKey = () => {
@@ -40,15 +52,22 @@ const Inbox: React.FC = () => {
             return;
         }
 
+        try {
+            parsePrivateKey(inputKey.trim());
+        } catch (err) {
+            message.error('Format kunci tidak valid. Pastikan format d=... dan n=... ada.');
+            return;
+        }
+
         localStorage.setItem('private_key', inputKey.trim());
         message.success('Kunci berhasil diamankan di memori browser.');
-        
+
         setIsKeyModalVisible(false);
         setInputKey('');
 
         if (pendingMessage) {
             processDecryption(pendingMessage, inputKey.trim());
-            setPendingMessage(null); // Bersihkan antrean
+            setPendingMessage(null);
         }
     };
 
@@ -63,15 +82,25 @@ const Inbox: React.FC = () => {
                 </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
-                {dummyMessages.map((msg) => (
-                    <MessageCard 
-                        key={msg.id} 
-                        msg={msg} 
-                        onDecrypt={handleDecryptClick} 
-                    />
-                ))}
-            </div>
+
+            {isLoading ? (
+                <div className="flex justify-center items-center h-64"><Spin size="large" /></div>
+            ) : isError ? (
+                <div className="text-center text-red-500 py-10">Gagal memuat pesan. <Button type="link" onClick={() => refetch()}>Coba lagi</Button></div>
+            ) : !inboxResponse?.data || inboxResponse.data.length === 0 ? (
+                <div className="bg-white rounded-xl p-10"><Empty description="Belum ada pesan terenkripsi yang masuk." /></div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+                    {inboxResponse?.data?.map((msg) => (
+                        <MessageCard
+                            key={msg.id}
+                            msg={msg}
+                            decryptedText={decryptedMessages[msg.id]}
+                            onDecrypt={handleDecryptClick}
+                        />
+                    ))}
+                </div>
+            )}
 
             <Modal
                 title={
@@ -107,7 +136,7 @@ const Inbox: React.FC = () => {
                     </div>
 
                     <div className="flex justify-end gap-2 mt-2">
-                        <Button 
+                        <Button
                             onClick={() => {
                                 setIsKeyModalVisible(false);
                                 setPendingMessage(null);
@@ -116,8 +145,8 @@ const Inbox: React.FC = () => {
                         >
                             Batal
                         </Button>
-                        <Button 
-                            type="primary" 
+                        <Button
+                            type="primary"
                             icon={<KeyOutlined />}
                             onClick={handleSaveKey}
                             className="rounded-lg! h-10!"
