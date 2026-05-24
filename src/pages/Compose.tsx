@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Input, Button, Tooltip } from 'antd';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Input, Button, Tooltip, message as antdMessage } from 'antd';
 import {
     SearchOutlined,
     LockOutlined,
@@ -8,34 +8,48 @@ import {
     CloseCircleFilled,
     LoadingOutlined
 } from '@ant-design/icons';
+import { useSendMessage } from '../hooks/mutations/useMessageMutation';
+import { findUserByUsername } from '../services/user.service';
+import type { UserData } from '../types';
+import { encryptRSA } from '../utils/rsaUtils';
 
 const Compose: React.FC = () => {
+    const currentUser = useMemo(() => {
+        const userStr = localStorage.getItem('user');
+        return userStr ? JSON.parse(userStr) : null;
+    }, []);
+
     const [recipient, setRecipient] = useState('');
     const [isValidating, setIsValidating] = useState(false);
-    const [isValidUser, setIsValidUser] = useState<boolean | null>(null);
+    const [targetUser, setTargetUser] = useState<UserData | null>(null);
 
     const [plainText, setPlainText] = useState('');
     const [cipherText, setCipherText] = useState('');
 
+    const sendMessageMutation = useSendMessage();
+
     useEffect(() => {
         if (!recipient) {
-            setIsValidUser(null);
+            setTargetUser(null);
             setIsValidating(false);
             return;
         }
 
-        setIsValidating(true);
-        setIsValidUser(null);
-
-        const timer = setTimeout(() => {
-            const dummyDatabase = ['johannes', 'budi', 'siti', 'dosen_jaringan', 'luckyfauzi'];
-
-            if (dummyDatabase.includes(recipient.toLowerCase())) {
-                setIsValidUser(true);
-            } else {
-                setIsValidUser(false);
+        const timer = setTimeout(async () => {
+            setIsValidating(true);
+            try {
+                const res = await findUserByUsername(recipient);
+                if (res && res.data) {
+                    setTargetUser(res.data);
+                    if (plainText) {
+                        setCipherText(encryptRSA(plainText, res.data.public_key_e, res.data.public_key_n));
+                    }
+                }
+            } catch (error) {
+                setTargetUser(null);
+            } finally {
+                setIsValidating(false);
             }
-            setIsValidating(false);
         }, 800);
 
         return () => clearTimeout(timer);
@@ -51,23 +65,43 @@ const Compose: React.FC = () => {
             return;
         }
 
-        const fakeEncryptedArray = val.split('').map(char => {
-            const fakeMath = (char.charCodeAt(0) * 41 * 13) % 881717;
-            return fakeMath;
-        });
-
-        setCipherText(`[ ${fakeEncryptedArray.join(', ')} ]`);
+        const target = targetUser;
+        const publicKeyE = target?.public_key_e;
+        const publicKeyN = target?.public_key_n;
+        const encrypted = encryptRSA(val, publicKeyE as string, publicKeyN as string);
+        setCipherText(encrypted);
     };
 
+    const handleKirimPesan = () => {
+        if (!targetUser || !cipherText || !currentUser) {
+            antdMessage.error('Pastikan Anda sudah login dan data penerima valid.');
+            return;
+        }
+
+        sendMessageMutation.mutate({
+            sender_id: currentUser?.user_id,
+            receiver_id: targetUser.user_id,
+            ciphertext: cipherText
+        }, {
+            onSuccess: () => {
+                antdMessage.success('Pesan rahasia berhasil dikirim!');
+                setPlainText('');
+                setCipherText('');
+                setRecipient('');
+            },
+            onError: (err: any) => {
+                const errorMsg = err.response?.data?.message || err.message;
+                antdMessage.error('Gagal mengirim pesan: ' + errorMsg);
+            }
+        });
+    };
+
+    const isValidUser = recipient ? (isValidating ? null : !!targetUser) : null;
 
     let suffixIcon = null;
-    if (isValidating) {
-        suffixIcon = <LoadingOutlined className="text-blue-500! text-lg!" />;
-    } else if (isValidUser === true) {
-        suffixIcon = <CheckCircleFilled className="text-green-500! text-lg!" />;
-    } else if (isValidUser === false) {
-        suffixIcon = <CloseCircleFilled className="text-red-500! text-lg!" />;
-    }
+    if (isValidating) suffixIcon = <LoadingOutlined className="text-blue-500! text-lg!" />;
+    else if (targetUser) suffixIcon = <CheckCircleFilled className="text-green-500! text-lg!" />;
+    else if (recipient && !targetUser && !isValidating) suffixIcon = <CloseCircleFilled className="text-red-500! text-lg!" />;
 
     return (
         <div className="w-full max-w-5xl mx-auto flex flex-col gap-6">
@@ -92,8 +126,8 @@ const Compose: React.FC = () => {
                         onChange={(e) => setRecipient(e.target.value)}
                         placeholder="Ketik username penerima..."
                         className={`rounded-lg! transition-colors duration-300 ${isValidUser === false
-                                ? 'border-red-400! hover:border-red-500! focus:border-red-500!'
-                                : 'hover:border-blue-500! focus:border-blue-500!'
+                            ? 'border-red-400! hover:border-red-500! focus:border-red-500!'
+                            : 'hover:border-blue-500! focus:border-blue-500!'
                             }`}
                     />
 
@@ -155,8 +189,10 @@ const Compose: React.FC = () => {
                         type="primary"
                         size="large"
                         icon={<LockOutlined />}
-                        disabled={!plainText || isValidUser !== true}
+                        disabled={!plainText || !targetUser}
+                        loading={sendMessageMutation.isPending}
                         className="w-full md:w-auto h-12! rounded-lg! px-8! font-semibold! shadow-lg! shadow-blue-500/30!"
+                        onClick={handleKirimPesan}
                     >
                         Kirim Pesan
                     </Button>
